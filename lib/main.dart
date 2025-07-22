@@ -35,6 +35,13 @@ class BarChartApp extends StatelessWidget {
   }
 }
 
+// Enum to define the type of reveal animation
+enum RevealAnimationType {
+  left,
+  right,
+  centerSplit,
+}
+
 class ChartDrilldown extends StatefulWidget {
   @override
   _ChartDrilldownState createState() => _ChartDrilldownState();
@@ -44,25 +51,30 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     with SingleTickerProviderStateMixin {
   bool _showMainChart = true;
   int? _selectedRangeIndex;
+  RevealAnimationType _currentAnimationType = RevealAnimationType.centerSplit; // Default
 
   late AnimationController _animationController;
   late Animation<double> _blackOverlayAnimation; // For the fade to black effect
   late Animation<double>
-      _splitRevealAnimation; // For the incoming sub-chart split
+      _revealAnimation; // For the incoming sub-chart reveal (can be left, right, or split)
 
-  final List<String> mainLabels = ['0-100', '101-200', '201-300', '301-400'];
-  final List<double> mainData = [150, 180, 100, 140];
+  final List<String> mainLabels = ['0-100', '101-200', '201-300', '301-400', '401-500', '501-600']; // Added more for testing right side
+  final List<double> mainData = [150, 180, 100, 140, 200, 120]; // Added more for testing right side
   final List<Color> barColors = [
     Colors.redAccent,
     Colors.amber,
     Colors.green,
     Colors.lightBlue,
+    Colors.purpleAccent,
+    Colors.orangeAccent,
   ];
   final List<Color> subBarColors = [
     Colors.deepOrange,
     Colors.purple,
     Colors.teal,
     Colors.pink,
+    Colors.brown,
+    Colors.blueGrey,
   ];
 
   final Map<int, List<double>> subChartData = {
@@ -70,6 +82,8 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     1: [60, 60, 60],
     2: [40, 30, 30],
     3: [90, 20, 30],
+    4: [70, 50, 80],
+    5: [45, 35, 40],
   };
 
   final Map<int, List<String>> subChartLabels = {
@@ -77,6 +91,8 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     1: ['D', 'E', 'F'],
     2: ['G', 'H', 'I'],
     3: ['J', 'K', 'L'],
+    4: ['M', 'N', 'O'],
+    5: ['P', 'Q', 'R'],
   };
 
   @override
@@ -96,8 +112,8 @@ class _ChartDrilldownState extends State<ChartDrilldown>
       ),
     );
 
-    // Animates the revealing of the sub chart from the center outwards
-    _splitRevealAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+    // Animates the revealing of the sub chart (reveal fraction for clipping)
+    _revealAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _animationController,
         curve: const Interval(0.5, 1.0,
@@ -113,8 +129,18 @@ class _ChartDrilldownState extends State<ChartDrilldown>
   }
 
   void _onBarTapped(int index) {
+    RevealAnimationType animationType;
+    if (index == 0 || index == 1) {
+      animationType = RevealAnimationType.left;
+    } else if (index == mainData.length - 1 || index == mainData.length - 2) {
+      animationType = RevealAnimationType.right;
+    } else {
+      animationType = RevealAnimationType.centerSplit;
+    }
+
     setState(() {
       _selectedRangeIndex = index;
+      _currentAnimationType = animationType; // Set the determined animation type
       _showMainChart = false;
       _animationController.forward(from: 0.0); // Start animation forward
     });
@@ -124,7 +150,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     setState(() {
       _showMainChart = true;
       _animationController.reverse(from: 1.0).then((_) {
-        // Start animation backward, then reset index
+        // Only nullify _selectedRangeIndex after reverse animation completes
         _selectedRangeIndex = null;
       });
     });
@@ -136,6 +162,15 @@ class _ChartDrilldownState extends State<ChartDrilldown>
       duration: const Duration(milliseconds: 1000),
       switchInCurve: Curves.easeInOut,
       switchOutCurve: Curves.easeInOut,
+      layoutBuilder: (currentChild, previousChildren) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            ...previousChildren, // Place outgoing children (main chart) behind
+            if (currentChild != null) currentChild, // Place incoming child (sub chart) on top
+          ],
+        );
+      },
       transitionBuilder: (Widget child, Animation<double> animation) {
         final isMainChart = child.key == const ValueKey('main');
 
@@ -143,7 +178,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
           animation: _animationController,
           builder: (context, _) {
             if (isMainChart) {
-              // This is the outgoing main chart. We want to apply a black overlay on it.
+              // This is the outgoing main chart. Apply a black overlay.
               return Stack(
                 children: [
                   child, // The main chart itself
@@ -159,10 +194,17 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                 ],
               );
             } else {
-              // This is the incoming sub-chart. Apply the split reveal.
+              // This is the incoming sub-chart. Apply the determined reveal.
+              // This flag ensures the clipper knows if it's animating forward (revealing)
+              // or backward (contracting), and stays fully revealed when completed.
+              final bool isAnimationForward = _animationController.status == AnimationStatus.forward ||
+                                              _animationController.status == AnimationStatus.completed;
+
               return ClipPath(
                 clipper: SplitRevealClipper(
-                  revealFraction: _splitRevealAnimation.value,
+                  revealFraction: _revealAnimation.value,
+                  animationType: _currentAnimationType, // Pass the animation type
+                  isForward: isAnimationForward, // Essential for proper clipping after completion
                 ),
                 child: child,
               );
@@ -279,7 +321,6 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                       showTitles: true,
                       reservedSize: 24, // Give space to show top labels
                       getTitlesWidget: (value, meta) {
-                        // You can show value, or data above each bar here
                         return const Text(
                           '', // You can also write: '${value.toInt()}' if needed
                           style: TextStyle(fontSize: 10),
@@ -301,6 +342,10 @@ class _ChartDrilldownState extends State<ChartDrilldown>
   }
 
   Widget _buildSubChart() {
+    // Ensure _selectedRangeIndex is not null before using it
+    if (_selectedRangeIndex == null) {
+      return const SizedBox.shrink(); // Or a loading indicator, or error message
+    }
     final data = subChartData[_selectedRangeIndex!]!;
     final labels = subChartLabels[_selectedRangeIndex!]!;
 
@@ -406,7 +451,6 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                       showTitles: true,
                       reservedSize: 24, // Give space to show top labels
                       getTitlesWidget: (value, meta) {
-                        // You can show value, or data above each bar here
                         return const Text(
                           '', // You can also write: '${value.toInt()}' if needed
                           style: TextStyle(fontSize: 10),
@@ -428,38 +472,68 @@ class _ChartDrilldownState extends State<ChartDrilldown>
   }
 }
 
-// Custom Clipper to achieve the split reveal effect
+// Custom Clipper to achieve dynamic reveal effect based on type
 class SplitRevealClipper extends CustomClipper<Path> {
   final double revealFraction;
+  final RevealAnimationType animationType; // New parameter
+  final bool isForward; // Crucial for correct clipping after animation
 
-  SplitRevealClipper({required this.revealFraction});
+  SplitRevealClipper({
+    required this.revealFraction,
+    required this.animationType,
+    required this.isForward,
+  });
 
   @override
   Path getClip(Size size) {
+    // The effective fraction depends on whether we are revealing (forward) or contracting (reverse)
+    final double effectiveRevealFraction = isForward ? revealFraction : (1.0 - revealFraction);
+
     final path = Path();
     final halfWidth = size.width / 2;
 
-    // Left half
-    path.addRect(Rect.fromLTWH(
-      0,
-      0,
-      halfWidth * revealFraction, // Expands from center left
-      size.height,
-    ));
+    switch (animationType) {
+      case RevealAnimationType.left:
+        path.addRect(Rect.fromLTWH(
+          0,
+          0,
+          size.width * effectiveRevealFraction,
+          size.height,
+        ));
+        break;
+      case RevealAnimationType.right:
+        path.addRect(Rect.fromLTWH(
+          size.width - (size.width * effectiveRevealFraction),
+          0,
+          size.width * effectiveRevealFraction,
+          size.height,
+        ));
+        break;
+      case RevealAnimationType.centerSplit:
+      // Left half (expands from center to left)
+        path.addRect(Rect.fromLTWH(
+          halfWidth - (halfWidth * effectiveRevealFraction),
+          0,
+          halfWidth * effectiveRevealFraction,
+          size.height,
+        ));
 
-    // Right half
-    path.addRect(Rect.fromLTWH(
-      size.width - (halfWidth * revealFraction), // Expands from center right
-      0,
-      halfWidth * revealFraction,
-      size.height,
-    ));
-
+        // Right half (expands from center to right)
+        path.addRect(Rect.fromLTWH(
+          halfWidth,
+          0,
+          halfWidth * effectiveRevealFraction,
+          size.height,
+        ));
+        break;
+    }
     return path;
   }
 
   @override
   bool shouldReclip(covariant SplitRevealClipper oldClipper) {
-    return oldClipper.revealFraction != revealFraction;
+    return oldClipper.revealFraction != revealFraction ||
+           oldClipper.animationType != animationType ||
+           oldClipper.isForward != isForward;
   }
 }
