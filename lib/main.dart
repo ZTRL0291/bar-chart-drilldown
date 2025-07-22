@@ -40,9 +40,15 @@ class ChartDrilldown extends StatefulWidget {
   _ChartDrilldownState createState() => _ChartDrilldownState();
 }
 
-class _ChartDrilldownState extends State<ChartDrilldown> {
+class _ChartDrilldownState extends State<ChartDrilldown>
+    with SingleTickerProviderStateMixin {
   bool _showMainChart = true;
   int? _selectedRangeIndex;
+
+  late AnimationController _animationController;
+  late Animation<double> _blackOverlayAnimation; // For the fade to black effect
+  late Animation<double>
+      _splitRevealAnimation; // For the incoming sub-chart split
 
   final List<String> mainLabels = ['0-100', '101-200', '201-300', '301-400'];
   final List<double> mainData = [150, 180, 100, 140];
@@ -73,37 +79,97 @@ class _ChartDrilldownState extends State<ChartDrilldown> {
     3: ['J', 'K', 'L'],
   };
 
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000), // Total animation duration
+    );
+
+    // Animates the black overlay on the main chart
+    _blackOverlayAnimation = Tween<double>(begin: 0.0, end: 0.1).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.0, 0.5,
+            curve: Curves.easeIn), // Fade in black in the first half
+      ),
+    );
+
+    // Animates the revealing of the sub chart from the center outwards
+    _splitRevealAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.5, 1.0,
+            curve: Curves.easeOut), // Reveal sub chart in the second half
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
   void _onBarTapped(int index) {
     setState(() {
       _selectedRangeIndex = index;
       _showMainChart = false;
+      _animationController.forward(from: 0.0); // Start animation forward
     });
   }
 
   void _goBack() {
     setState(() {
       _showMainChart = true;
-      _selectedRangeIndex = null;
+      _animationController.reverse(from: 1.0).then((_) {
+        // Start animation backward, then reset index
+        _selectedRangeIndex = null;
+      });
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 1000),
       switchInCurve: Curves.easeInOut,
       switchOutCurve: Curves.easeInOut,
       transitionBuilder: (Widget child, Animation<double> animation) {
         final isMainChart = child.key == const ValueKey('main');
 
-        final offsetAnimation = Tween<Offset>(
-          begin: isMainChart ? const Offset(-1.0, 0.0) : const Offset(1.0, 0.0),
-          end: Offset.zero,
-        ).animate(animation);
-
-        return SlideTransition(
-          position: offsetAnimation,
-          child: child,
+        return AnimatedBuilder(
+          animation: _animationController,
+          builder: (context, _) {
+            if (isMainChart) {
+              // This is the outgoing main chart. We want to apply a black overlay on it.
+              return Stack(
+                children: [
+                  child, // The main chart itself
+                  IgnorePointer(
+                    // Prevent interaction with the fading overlay
+                    child: Opacity(
+                      opacity: _blackOverlayAnimation.value,
+                      child: Container(
+                        color: Colors.black, // The black overlay
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            } else {
+              // This is the incoming sub-chart. Apply the split reveal.
+              return ClipPath(
+                clipper: SplitRevealClipper(
+                  revealFraction: _splitRevealAnimation.value,
+                ),
+                child: child,
+              );
+            }
+          },
+          child:
+              child, // The child here will be either _buildMainChart() or _buildSubChart()
         );
       },
       child: _showMainChart ? _buildMainChart() : _buildSubChart(),
@@ -359,5 +425,41 @@ class _ChartDrilldownState extends State<ChartDrilldown> {
         ],
       ),
     );
+  }
+}
+
+// Custom Clipper to achieve the split reveal effect
+class SplitRevealClipper extends CustomClipper<Path> {
+  final double revealFraction;
+
+  SplitRevealClipper({required this.revealFraction});
+
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+    final halfWidth = size.width / 2;
+
+    // Left half
+    path.addRect(Rect.fromLTWH(
+      0,
+      0,
+      halfWidth * revealFraction, // Expands from center left
+      size.height,
+    ));
+
+    // Right half
+    path.addRect(Rect.fromLTWH(
+      size.width - (halfWidth * revealFraction), // Expands from center right
+      0,
+      halfWidth * revealFraction,
+      size.height,
+    ));
+
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant SplitRevealClipper oldClipper) {
+    return oldClipper.revealFraction != revealFraction;
   }
 }
