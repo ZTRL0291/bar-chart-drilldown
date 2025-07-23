@@ -51,7 +51,8 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     with SingleTickerProviderStateMixin {
   bool _showMainChart = true;
   int? _selectedRangeIndex;
-  RevealAnimationType _currentAnimationType = RevealAnimationType.centerSplit; // Default
+  RevealAnimationType _currentAnimationType =
+      RevealAnimationType.centerSplit; // Default
 
   late AnimationController _animationController;
   late Animation<double> _blackOverlayAnimation; // For the fade to black effect
@@ -59,7 +60,14 @@ class _ChartDrilldownState extends State<ChartDrilldown>
       _revealAnimation; // For the incoming sub-chart reveal (can be left, right, or split)
 
   // --- Updated Data Structures for Grouped Bars ---
-  final List<String> mainLabels = ['0-100', '101-200', '201-300', '301-400', '401-500', '501-600'];
+  final List<String> mainLabels = [
+    '0-100',
+    '101-200',
+    '201-300',
+    '301-400',
+    '401-500',
+    '501-600'
+  ];
   // List of lists for main chart data (e.g., [Actual, Target] for each group)
   final List<List<double>> mainGroupedData = [
     [150, 130], // For '0-100' (Actual, Target)
@@ -129,17 +137,10 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     4: ['M', 'N', 'O'],
     5: ['P', 'Q', 'R'],
   };
-
-  // Define subBarColors for sub chart bars
-  final List<Color> subBarColors = [
-    Colors.deepOrange,
-    Colors.teal,
-    Colors.indigo,
-    Colors.pink,
-    Colors.blueGrey,
-    Colors.lime,
-  ];
   // --- End Updated Data Structures ---
+
+  // --- State variable for the currently hovered group index ---
+  int? _hoveredGroupIndex;
 
   @override
   void initState() {
@@ -152,7 +153,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     _blackOverlayAnimation = Tween<double>(begin: 0.0, end: 0.1).animate(
       CurvedAnimation(
         parent: _animationController,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeIn),
+        curve: const Interval(0.1, 0.5, curve: Curves.easeIn),
       ),
     );
 
@@ -174,7 +175,8 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     RevealAnimationType animationType;
     if (index == 0 || index == 1) {
       animationType = RevealAnimationType.left;
-    } else if (index == mainGroupedData.length - 1 || index == mainGroupedData.length - 2) {
+    } else if (index == mainGroupedData.length - 1 ||
+        index == mainGroupedData.length - 2) {
       animationType = RevealAnimationType.right;
     } else {
       animationType = RevealAnimationType.centerSplit;
@@ -193,6 +195,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
       _showMainChart = true;
       _animationController.reverse(from: 1.0).then((_) {
         _selectedRangeIndex = null;
+        _hoveredGroupIndex = null; // Reset hovered index when going back
       });
     });
   }
@@ -200,7 +203,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 500),
       switchInCurve: Curves.easeInOut,
       switchOutCurve: Curves.easeInOut,
       layoutBuilder: (currentChild, previousChildren) {
@@ -226,7 +229,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                     child: Opacity(
                       opacity: _blackOverlayAnimation.value,
                       child: Container(
-                        color: Colors.black,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -288,21 +291,39 @@ class _ChartDrilldownState extends State<ChartDrilldown>
               BarChartData(
                 barGroups: List.generate(mainGroupedData.length, (index) {
                   final groupData = mainGroupedData[index];
+                  // Determine if the current group is hovered
+                  final isHovered = index == _hoveredGroupIndex;
+
                   return BarChartGroupData(
                     x: index,
-                    // Define multiple BarChartRodData for each group
                     barRods: [
                       BarChartRodData(
                         toY: groupData[0], // First bar (e.g., Actual)
-                        color: barColors1[index],
-                        width: 40, // Adjust width as needed
-                        borderRadius: BorderRadius.circular(4),
+                        color: isHovered
+                            ? barColors1[index].withOpacity(0.8)
+                            : barColors1[index],
+                        width: isHovered ? 40 : 40, // Slightly larger on hover
+                        // --- REMOVE CIRCULAR CORNERS HERE ---
+                        borderRadius: BorderRadius.zero, // Make corners sharp
+                        // --- END REMOVE CIRCULAR CORNERS ---
+                        borderSide: isHovered
+                            ? BorderSide(
+                                color: Colors.black.withOpacity(0.5), width: 2)
+                            : BorderSide.none,
                       ),
                       BarChartRodData(
                         toY: groupData[1], // Second bar (e.g., Target)
-                        color: barColors2[index],
-                        width: 40, // Adjust width as needed
-                        borderRadius: BorderRadius.circular(4),
+                        color: isHovered
+                            ? barColors2[index].withOpacity(0.8)
+                            : barColors2[index],
+                        width: isHovered ? 40 : 40, // Slightly larger on hover
+                        // --- REMOVE CIRCULAR CORNERS HERE ---
+                        borderRadius: BorderRadius.zero, // Make corners sharp
+                        // --- END REMOVE CIRCULAR CORNERS ---
+                        borderSide: isHovered
+                            ? BorderSide(
+                                color: Colors.black.withOpacity(0.5), width: 2)
+                            : BorderSide.none,
                       ),
                     ],
                     barsSpace: 8, // Space between the two bars in a group
@@ -315,27 +336,44 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                     tooltipPadding: const EdgeInsets.all(8),
                     tooltipMargin: 8,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      // Adjust tooltip to show data for the specific rod touched
-                      final value = mainGroupedData[groupIndex][rodIndex].toInt();
-                      String label = rodIndex == 0 ? 'Actual' : 'Target';
+                      final currentGroupData = mainGroupedData[groupIndex];
+                      final actual = currentGroupData[0].toInt();
+                      final target = currentGroupData[1].toInt();
                       return BarTooltipItem(
-                        '$label: $value',
+                        'Actual: $actual\nTarget: $target',
                         const TextStyle(color: Colors.black),
                       );
                     },
                   ),
                   touchCallback: (event, response) {
-                    if (event is FlTapUpEvent &&
-                        response != null &&
-                        response.spot != null) {
-                      _onBarTapped(response.spot!.touchedBarGroupIndex);
+                    if (event.isInterestedForInteractions) {
+                      setState(() {
+                        _hoveredGroupIndex =
+                            response?.spot?.touchedBarGroupIndex;
+                      });
+                    } else {
+                      setState(() {
+                        _hoveredGroupIndex = null; // Reset when not hovered
+                      });
+                    }
+                    if (event is FlTapUpEvent && response?.spot != null) {
+                      _onBarTapped(response!.spot!.touchedBarGroupIndex);
                     }
                   },
                 ),
                 titlesData: FlTitlesData(
+                  // --- SHOW Y-AXIS LABELS ON RIGHT ONLY ---
                   leftTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 40), // Enable left titles
                   ),
+                  rightTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: false,
+                    ), // Disable right  titles
+                  ),
+                  // --- END Y-AXIS LABELS ---
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
@@ -388,6 +426,16 @@ class _ChartDrilldownState extends State<ChartDrilldown>
     );
   }
 
+  // Define subBarColors for sub-chart bars
+  final List<Color> subBarColors = [
+    Colors.deepOrange,
+    Colors.teal,
+    Colors.indigo,
+    Colors.pinkAccent,
+    Colors.cyan,
+    Colors.lime,
+  ];
+
   Widget _buildSubChart() {
     if (_selectedRangeIndex == null) {
       return const SizedBox.shrink();
@@ -434,20 +482,48 @@ class _ChartDrilldownState extends State<ChartDrilldown>
               BarChartData(
                 barGroups: List.generate(data.length, (index) {
                   final groupData = data[index];
+                  // Determine if the current group is hovered
+                  final isHovered = index == _hoveredGroupIndex;
+
+                  // Apply highlight effect here
+                  final Color bar1Color = isHovered
+                      ? subBarColors[index % subBarColors.length]
+                          .withOpacity(0.8)
+                      : subBarColors[index % subBarColors.length];
+                  final Color bar2Color = isHovered
+                      ? subBarColors[index % subBarColors.length]
+                          .withOpacity(0.4)
+                      : subBarColors[index % subBarColors.length]
+                          .withOpacity(0.5);
+                  final double barWidth =
+                      isHovered ? 40 : 40; // Slightly larger on hover
+
                   return BarChartGroupData(
                     x: index,
                     barRods: [
                       BarChartRodData(
                         toY: groupData[0], // First bar (e.g., Actual)
-                        color: subBarColors[index % subBarColors.length],
-                        width: 40,
-                        borderRadius: BorderRadius.circular(4),
+                        color: bar1Color,
+                        width: barWidth,
+                        // --- REMOVE CIRCULAR CORNERS HERE ---
+                        borderRadius: BorderRadius.zero, // Make corners sharp
+                        // --- END REMOVE CIRCULAR CORNERS ---
+                        borderSide: isHovered
+                            ? BorderSide(
+                                color: Colors.black.withOpacity(0.5), width: 2)
+                            : BorderSide.none,
                       ),
                       BarChartRodData(
                         toY: groupData[1], // Second bar (e.g., Target)
-                        color: subBarColors[index % subBarColors.length].withOpacity(0.5), // Lighter shade
-                        width: 40,
-                        borderRadius: BorderRadius.circular(4),
+                        color: bar2Color,
+                        width: barWidth,
+                        // --- REMOVE CIRCULAR CORNERS HERE ---
+                        borderRadius: BorderRadius.zero, // Make corners sharp
+                        // --- END REMOVE CIRCULAR CORNERS ---
+                        borderSide: isHovered
+                            ? BorderSide(
+                                color: Colors.black.withOpacity(0.5), width: 2)
+                            : BorderSide.none,
                       ),
                     ],
                     barsSpace: 8, // Space between bars in a group
@@ -460,19 +536,43 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                     tooltipPadding: const EdgeInsets.all(8),
                     tooltipMargin: 8,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final value = data[groupIndex][rodIndex].toInt();
-                      String label = rodIndex == 0 ? 'Actual' : 'Target';
+                      final currentGroupData = data[groupIndex];
+                      final actual = currentGroupData[0].toInt();
+                      final target = currentGroupData[1].toInt();
+
                       return BarTooltipItem(
-                        '$label: $value',
+                        'Actual: $actual\nTarget: $target',
                         const TextStyle(color: Colors.black),
                       );
                     },
                   ),
+                  touchCallback: (event, response) {
+                    if (event.isInterestedForInteractions) {
+                      setState(() {
+                        _hoveredGroupIndex =
+                            response?.spot?.touchedBarGroupIndex;
+                      });
+                    } else {
+                      setState(() {
+                        _hoveredGroupIndex = null; // Reset when not hovered
+                      });
+                    }
+                    // No tap action for sub-chart based on your current code
+                  },
                 ),
                 titlesData: FlTitlesData(
+                  // --- SHOW Y-AXIS LABELS ON RIGHT ONLY ---
                   leftTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 40), // Enable  left  titles
                   ),
+                  rightTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: false,
+                    ), // Disable right titles
+                  ),
+                  // --- END Y-AXIS LABELS ---
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
@@ -516,7 +616,8 @@ class _ChartDrilldownState extends State<ChartDrilldown>
               children: [
                 const _LegendColor(color: Colors.deepOrange, text: 'Actual'),
                 const SizedBox(width: 20),
-                _LegendColor(color: Colors.deepOrange.withOpacity(0.5), text: 'Target'),
+                _LegendColor(
+                    color: Colors.deepOrange.withOpacity(0.5), text: 'Target'),
               ],
             ),
           ),
@@ -540,7 +641,8 @@ class SplitRevealClipper extends CustomClipper<Path> {
 
   @override
   Path getClip(Size size) {
-    final double effectiveRevealFraction = isForward ? revealFraction : (1.0 - revealFraction);
+    final double effectiveRevealFraction =
+        isForward ? revealFraction : (1.0 - revealFraction);
 
     final path = Path();
     final halfWidth = size.width / 2;
@@ -584,8 +686,8 @@ class SplitRevealClipper extends CustomClipper<Path> {
   @override
   bool shouldReclip(covariant SplitRevealClipper oldClipper) {
     return oldClipper.revealFraction != revealFraction ||
-           oldClipper.animationType != animationType ||
-           oldClipper.isForward != isForward;
+        oldClipper.animationType != animationType ||
+        oldClipper.isForward != isForward;
   }
 }
 
