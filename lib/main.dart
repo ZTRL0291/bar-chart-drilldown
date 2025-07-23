@@ -281,10 +281,37 @@ class _ChartDrilldownState extends State<ChartDrilldown>
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
+           // Adjusted for consistent spacing
           const Text(
             'Click on bars to filter page',
             style: TextStyle(color: Colors.grey),
           ),
+          const SizedBox(height: 4),
+          // Back button for consistency, but disabled on the main chart
+          SizedBox(
+            height: 40, // Fixed height for consistent spacing
+            child: TextButton.icon(
+              onPressed: null, // Initially disabled
+              icon: const Icon(
+                Icons.arrow_back,
+                color: Colors.grey,
+                size: 20.0,
+              ),
+              label: const Text(
+                'Back',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 16.0,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          
           const SizedBox(height: 16),
           Expanded(
             child: BarChart(
@@ -362,18 +389,18 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                   },
                 ),
                 titlesData: FlTitlesData(
-                  // --- SHOW Y-AXIS LABELS ON RIGHT ONLY ---
+                  // --- REMOVE BOTH Y-AXIS LABELS (LEFT AND RIGHT) ---
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 40), // Enable left titles
+                      showTitles: false, // Disable left titles
+                    ),
                   ),
                   rightTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: false,
-                    ), // Disable right  titles
+                      showTitles: false, // Disable right titles
+                    ),
                   ),
-                  // --- END Y-AXIS LABELS ---
+                  // --- END REMOVE Y-AXIS LABELS ---
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
@@ -461,21 +488,41 @@ class _ChartDrilldownState extends State<ChartDrilldown>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ElevatedButton.icon(
-            onPressed: _goBack,
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('Back'),
+          const Text(
+            'Attendance Ranges',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 16),
-          Text(
-            'Details for: ${mainLabels[_selectedRangeIndex!]}',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           const Text(
             'Click on bars for more details',
             style: TextStyle(color: Colors.grey),
           ),
+          const SizedBox(height: 4), // Adjusted for consistent spacing
+          // Back button on the sub-chart
+          SizedBox(
+            height: 40, // Fixed height for consistent spacing
+            child: TextButton.icon(
+              onPressed: _goBack,
+              icon: const Icon(
+                Icons.arrow_back,
+                color: Colors.black,
+                size: 20.0,
+              ),
+              label: const Text(
+                'Back',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontSize: 16.0,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          
           const SizedBox(height: 16),
           Expanded(
             child: BarChart(
@@ -561,18 +608,18 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                   },
                 ),
                 titlesData: FlTitlesData(
-                  // --- SHOW Y-AXIS LABELS ON RIGHT ONLY ---
+                  // --- REMOVE BOTH Y-AXIS LABELS (LEFT AND RIGHT) ---
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 40), // Enable  left  titles
+                      showTitles: false, // Disable left titles
+                    ),
                   ),
                   rightTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: false,
-                    ), // Disable right titles
+                      showTitles: false, // Disable right titles
+                    ),
                   ),
-                  // --- END Y-AXIS LABELS ---
+                  // --- END REMOVE Y-AXIS LABELS ---
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
