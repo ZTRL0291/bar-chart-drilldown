@@ -42,6 +42,29 @@ enum RevealAnimationType {
   centerSplit,
 }
 
+/// A data model to hold all information for a single bar chart level.
+class ChartData {
+  final List<String> labels;
+  final List<List<double>> groupedData;
+  final String title;
+  final String description;
+  final double maxY;
+  final List<Color> barColors1;
+  final List<Color> barColors2;
+  final String id; // Unique identifier for each chart level
+
+  ChartData({
+    required this.labels,
+    required this.groupedData,
+    required this.title,
+    required this.description,
+    required this.maxY,
+    required this.barColors1,
+    required this.barColors2,
+    required this.id,
+  });
+}
+
 class ChartDrilldown extends StatefulWidget {
   @override
   _ChartDrilldownState createState() => _ChartDrilldownState();
@@ -49,120 +72,168 @@ class ChartDrilldown extends StatefulWidget {
 
 class _ChartDrilldownState extends State<ChartDrilldown>
     with SingleTickerProviderStateMixin {
-  bool _showMainChart = true;
-  int? _selectedRangeIndex;
+  // Use a stack to manage multiple chart levels
+  late List<ChartData> _chartStack;
+
   RevealAnimationType _currentAnimationType =
-      RevealAnimationType.centerSplit; // Default
+      RevealAnimationType.centerSplit; // Default for initial drill-down
 
   late AnimationController _animationController;
-  late Animation<double> _blackOverlayAnimation; // For the fade to black effect
-  late Animation<double>
-      _revealAnimation; // For the incoming sub-chart reveal (can be left, right, or split)
+  late Animation<double> _revealAnimation;
 
-  // --- Updated Data Structures for Grouped Bars ---
-  final List<String> mainLabels = [
-    '0-100',
-    '101-200',
-    '201-300',
-    '301-400',
-    '401-500',
-    '501-600'
-  ];
-  // List of lists for main chart data (e.g., [Actual, Target] for each group)
-  final List<List<double>> mainGroupedData = [
-    [150, 130], // For '0-100' (Actual, Target)
-    [180, 160], // For '101-200'
-    [100, 110], // For '201-300'
-    [140, 150], // For '301-400'
-    [200, 190], // For '401-500'
-    [120, 100], // For '501-600'
-  ];
+  // This flag will tell the AnimatedSwitcher whether to animate a drill-down or just switch
+  bool _isDrillingDown = false;
 
-  final List<Color> barColors1 = [
-    Colors.redAccent,
-    Colors.amber,
-    Colors.green,
-    Colors.lightBlue,
-    Colors.purpleAccent,
-    Colors.orangeAccent,
-  ];
-  final List<Color> barColors2 = [
-    Colors.redAccent.shade100, // Lighter shade for the second bar
-    Colors.amber.shade100,
-    Colors.green.shade100,
-    Colors.lightBlue.shade100,
-    Colors.purpleAccent.shade100,
-    Colors.orangeAccent.shade100,
-  ];
+  // --- Data Structures for Grouped Bars across multiple levels ---
+  // Helper function to create sub-chart data (for readability and reusability)
+  ChartData _createChartData({
+    required String parentId,
+    required int index,
+    required List<String> labels,
+    required List<List<double>> data,
+    required String titlePrefix,
+  }) {
+    // Calculate maxY dynamically based on the data
+    final double calculatedMaxY =
+        data.expand((e) => e).reduce((a, b) => a > b ? a : b) * 1.2;
+    // Ensure maxY is at least 100 for smaller data sets
+    final double finalMaxY = calculatedMaxY < 100 ? 100 : calculatedMaxY;
 
-  // Map of lists of lists for sub-chart data
-  final Map<int, List<List<double>>> subChartGroupedData = {
-    0: [
-      [50, 45],
-      [30, 35],
-      [70, 60]
-    ],
-    1: [
-      [60, 55],
-      [60, 65],
-      [60, 50]
-    ],
-    2: [
-      [40, 38],
-      [30, 25],
-      [30, 32]
-    ],
-    3: [
-      [90, 85],
-      [20, 25],
-      [30, 30]
-    ],
-    4: [
-      [70, 65],
-      [50, 55],
-      [80, 75]
-    ],
-    5: [
-      [45, 40],
-      [35, 30],
-      [40, 42]
-    ],
-  };
+    // Use different color sets for different levels to visually distinguish
+    List<Color> colors1;
+    List<Color> colors2;
 
-  final Map<int, List<String>> subChartLabels = {
-    0: ['A', 'B', 'C'],
-    1: ['D', 'E', 'F'],
-    2: ['G', 'H', 'I'],
-    3: ['J', 'K', 'L'],
-    4: ['M', 'N', 'O'],
-    5: ['P', 'Q', 'R'],
-  };
-  // --- End Updated Data Structures ---
+    if (parentId == 'main') {
+      colors1 = List.generate(
+          labels.length, (i) => Colors.primaries[(index + i) % Colors.primaries.length]);
+      colors2 = List.generate(
+          labels.length,
+          (i) => Colors.primaries[(index + i) % Colors.primaries.length]
+              .withOpacity(0.5));
+    } else if (parentId.startsWith('main-') && !parentId.contains('-', parentId.indexOf('-') + 1)) { // Level 2
+      colors1 = List.generate(
+          labels.length, (i) => Colors.blueGrey[(index + i) * 100 % 900] ?? Colors.blueGrey);
+      colors2 = List.generate(
+          labels.length,
+          (i) => (Colors.blueGrey[(index + i) * 100 % 900] ?? Colors.blueGrey)
+              .withOpacity(0.5));
+    } else { // Level 3 and deeper
+      colors1 = List.generate(
+          labels.length, (i) => Colors.deepPurple[(index + i) * 100 % 900] ?? Colors.deepPurple);
+      colors2 = List.generate(
+          labels.length,
+          (i) => (Colors.deepPurple[(index + i) * 100 % 900] ?? Colors.deepPurple)
+              .withOpacity(0.5));
+    }
 
-  // --- State variable for the currently hovered group index ---
+    return ChartData(
+      id: '$parentId-$index', // Unique ID for each chart data instance
+      labels: labels,
+      groupedData: data,
+      title: '$titlePrefix ${labels.first}-${labels.last}',
+      description: 'Details for $titlePrefix',
+      maxY: finalMaxY,
+      barColors1: colors1,
+      barColors2: colors2,
+    );
+  }
+
+  // Define your drilldown hierarchy more explicitly using ChartData instances
+  final Map<String, Map<int, ChartData>> drilldownHierarchy = {};
+
+  void _initializeDrilldownData() {
+    // Main chart children (level 1)
+    drilldownHierarchy['main'] = {
+      0: _createChartData(parentId: 'main', index: 0, labels: ['A', 'B', 'C'], data: [
+        [50, 45], [30, 35], [70, 60]
+      ], titlePrefix: 'Sub-Category for 0-100'),
+      1: _createChartData(parentId: 'main', index: 1, labels: ['D', 'E', 'F'], data: [
+        [60, 55], [60, 65], [60, 50]
+      ], titlePrefix: 'Sub-Category for 101-200'),
+      2: _createChartData(parentId: 'main', index: 2, labels: ['G', 'H', 'I'], data: [
+        [40, 38], [30, 25], [30, 32]
+      ], titlePrefix: 'Sub-Category for 201-300'),
+      3: _createChartData(parentId: 'main', index: 3, labels: ['J', 'K', 'L'], data: [
+        [90, 85], [20, 25], [30, 30]
+      ], titlePrefix: 'Sub-Category for 301-400'),
+      4: _createChartData(parentId: 'main', index: 4, labels: ['M', 'N', 'O'], data: [
+        [70, 65], [50, 55], [80, 75]
+      ], titlePrefix: 'Sub-Category for 401-500'),
+      5: _createChartData(parentId: 'main', index: 5, labels: ['P', 'Q', 'R'], data: [
+        [45, 40], [35, 30], [40, 42]
+      ], titlePrefix: 'Sub-Category for 501-600'),
+    };
+
+    // Deeper drilldown (level 2) - Example: from 'main-0' (A, B, C)
+    drilldownHierarchy['main-0'] = {
+      0: _createChartData(parentId: 'main-0', index: 0, labels: ['A.1', 'A.2'], data: [
+        [20, 18], [15, 17]
+      ], titlePrefix: 'Detail for A'),
+      1: _createChartData(parentId: 'main-0', index: 1, labels: ['B.1', 'B.2'], data: [
+        [10, 8], [8, 10]
+      ], titlePrefix: 'Detail for B'),
+      2: _createChartData(parentId: 'main-0', index: 2, labels: ['C.1', 'C.2'], data: [
+        [30, 28], [20, 22]
+      ], titlePrefix: 'Detail for C'),
+    };
+
+    // Even deeper drilldown (level 3) - Example: from 'main-0-0' (A.1, A.2)
+    drilldownHierarchy['main-0-0'] = {
+      0: _createChartData(parentId: 'main-0-0', index: 0, labels: ['A.1.1', 'A.1.2'], data: [
+        [5, 4], [7, 6]
+      ], titlePrefix: 'Sub-detail for A.1'),
+      1: _createChartData(parentId: 'main-0-0', index: 1, labels: ['A.2.1', 'A.2.2'], data: [
+        [3, 2], [5, 4]
+      ], titlePrefix: 'Sub-detail for A.2'),
+    };
+     // Adding more level 2 and level 3 data for other main categories
+    drilldownHierarchy['main-1'] = {
+      0: _createChartData(parentId: 'main-1', index: 0, labels: ['D.1', 'D.2'], data: [
+        [25, 22], [20, 23]
+      ], titlePrefix: 'Detail for D'),
+    };
+    drilldownHierarchy['main-1-0'] = {
+      0: _createChartData(parentId: 'main-1-0', index: 0, labels: ['D.1.1', 'D.1.2'], data: [
+        [10, 9], [8, 10]
+      ], titlePrefix: 'Further detail for D.1'),
+    };
+  }
+
   int? _hoveredGroupIndex;
 
   @override
   void initState() {
     super.initState();
+    _initializeDrilldownData(); // Initialize your hierarchical data
+
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000), // Total animation duration
+      duration: const Duration(milliseconds: 700), // Duration for drill-down animation
     );
 
-    _blackOverlayAnimation = Tween<double>(begin: 0.0, end: 0.1).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.1, 0.5, curve: Curves.easeIn),
-      ),
+    _revealAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOut,
+      // No reverse curve needed for direct back
     );
 
-    _revealAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
-      ),
-    );
+    // Initialize the chart stack with the main chart data
+    _chartStack = [
+      ChartData(
+        id: 'main', // Unique ID for the main chart
+        labels: [
+          '0-100', '101-200', '201-300', '301-400', '401-500', '501-600'
+        ],
+        groupedData: [
+          [150, 130], [180, 160], [100, 110], [140, 150], [200, 190], [120, 100]
+        ],
+        title: 'Main Attendance Ranges',
+        description: 'Click on bars to drill down to sub-categories',
+        maxY: 250,
+        barColors1: List.generate(6, (index) => Colors.primaries[index]),
+        barColors2: List.generate(6, (index) => Colors.primaries[index].withOpacity(0.5)),
+      )
+    ];
   }
 
   @override
@@ -172,94 +243,107 @@ class _ChartDrilldownState extends State<ChartDrilldown>
   }
 
   void _onBarTapped(int index) {
-    RevealAnimationType animationType;
-    if (index == 0 || index == 1) {
-      animationType = RevealAnimationType.left;
-    } else if (index == mainGroupedData.length - 1 ||
-        index == mainGroupedData.length - 2) {
-      animationType = RevealAnimationType.right;
-    } else {
-      animationType = RevealAnimationType.centerSplit;
-    }
+    final currentChartId = _chartStack.last.id;
+    final Map<int, ChartData>? children = drilldownHierarchy[currentChartId];
 
-    setState(() {
-      _selectedRangeIndex = index;
-      _currentAnimationType = animationType;
-      _showMainChart = false;
-      _animationController.forward(from: 0.0);
-    });
+    if (children != null && children.containsKey(index)) {
+      final ChartData nextChartData = children[index]!;
+
+      RevealAnimationType animationType;
+      // Determine animation type based on the tapped bar's position
+      if (index == 0 || index == 1) {
+        animationType = RevealAnimationType.left;
+      } else if (index == (_chartStack.last.groupedData.length - 1) ||
+          index == (_chartStack.last.groupedData.length - 2)) {
+        animationType = RevealAnimationType.right;
+      } else {
+        animationType = RevealAnimationType.centerSplit;
+      }
+
+      setState(() {
+        _isDrillingDown = true; // Flag for drill-down animation
+        _chartStack.add(nextChartData); // Add new chart to stack
+        _currentAnimationType = animationType;
+        _animationController.reset(); // Reset to start from 0
+        _animationController.forward(); // Start animation forward
+        _hoveredGroupIndex = null; // Clear hovered state on drill down
+      });
+    } else {
+      print('No deeper drilldown data for this bar at ID: $currentChartId, Index: $index');
+      // Optionally, show a toast or a message to the user that there's no deeper level.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No further details available for this bar.')),
+      );
+    }
   }
 
   void _goBack() {
-    setState(() {
-      _showMainChart = true;
-      _animationController.reverse(from: 1.0).then((_) {
-        _selectedRangeIndex = null;
+    if (_chartStack.length > 1) {
+      setState(() {
+        _isDrillingDown = false; // Flag for NO drill-down animation (i.e., immediate switch)
+        _chartStack.removeLast(); // Simply remove the last item from the stack
         _hoveredGroupIndex = null; // Reset hovered index when going back
+        // No animationcontroller.reverse() or forward().then() needed here
+        // The AnimatedSwitcher will just switch to the new child directly.
       });
-    });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final currentChartData = _chartStack.last;
+
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 500),
-      switchInCurve: Curves.easeInOut,
-      switchOutCurve: Curves.easeInOut,
+      // The duration here will only apply to the "switch in" of the new child
+      // if no specific transitionBuilder is applied to it (which we do for drill-down)
+      // When going back, we want an immediate switch, so we can set this lower
+      // or ensure our transitionBuilder handles the 'back' case to not apply animation.
+      duration: _isDrillingDown ? const Duration(milliseconds: 700) : Duration.zero,
+      switchInCurve: Curves.easeInOutCubic,
+      switchOutCurve: Curves.easeInOutCubic,
       layoutBuilder: (currentChild, previousChildren) {
         return Stack(
           alignment: Alignment.center,
           children: [
+            // previousChildren are still rendered for AnimatedSwitcher to handle its own default transitions
             ...previousChildren,
             if (currentChild != null) currentChild,
           ],
         );
       },
       transitionBuilder: (Widget child, Animation<double> animation) {
-        final isMainChart = child.key == const ValueKey('main');
-
-        return AnimatedBuilder(
-          animation: _animationController,
-          builder: (context, _) {
-            if (isMainChart) {
-              return Stack(
-                children: [
-                  child,
-                  IgnorePointer(
-                    child: Opacity(
-                      opacity: _blackOverlayAnimation.value,
-                      child: Container(
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            } else {
-              final bool isAnimationForward =
-                  _animationController.status == AnimationStatus.forward ||
-                      _animationController.status == AnimationStatus.completed;
-
+        // If we are drilling down, or if the animation controller is active,
+        // apply the custom clipper. Otherwise, just return the child directly
+        // for an immediate switch (which will happen on back).
+        if (_isDrillingDown && _animationController.status != AnimationStatus.dismissed) {
+          return AnimatedBuilder(
+            animation: _animationController, // Listen to our custom controller
+            builder: (context, abChild) {
               return ClipPath(
                 clipper: SplitRevealClipper(
                   revealFraction: _revealAnimation.value,
                   animationType: _currentAnimationType,
-                  isForward: isAnimationForward,
+                  isForward: true, // Always true for the drill-down reveal
                 ),
-                child: child,
+                child: abChild,
               );
-            }
-          },
-          child: child,
-        );
+            },
+            child: child, // The child provided by AnimatedSwitcher
+          );
+        }
+        // For 'back' operations (_isDrillingDown is false) or when drill-down animation is not active,
+        // just return the child directly without any custom clipping animation.
+        return child;
       },
-      child: _showMainChart ? _buildMainChart() : _buildSubChart(),
+      // The key here is the ID of the chart data, not just the title.
+      // This ensures AnimatedSwitcher properly identifies changes even if titles are similar.
+      child: _buildChart(currentChartData),
     );
   }
 
-  Widget _buildMainChart() {
+  Widget _buildChart(ChartData chartData) {
     return Container(
-      key: const ValueKey('main'),
+      key: ValueKey(chartData.id), // Important for AnimatedSwitcher to detect child change based on unique ID
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -276,31 +360,29 @@ class _ChartDrilldownState extends State<ChartDrilldown>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Attendance Ranges',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          Text(
+            chartData.title,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-           // Adjusted for consistent spacing
-          const Text(
-            'Click on bars to filter page',
-            style: TextStyle(color: Colors.grey),
+          Text(
+            chartData.description,
+            style: const TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 4),
-          // Back button for consistency, but disabled on the main chart
           SizedBox(
             height: 40, // Fixed height for consistent spacing
             child: TextButton.icon(
-              onPressed: null, // Initially disabled
-              icon: const Icon(
+              onPressed: _chartStack.length > 1 ? _goBack : null, // Enable back button only if not on main chart
+              icon: Icon(
                 Icons.arrow_back,
-                color: Colors.grey,
+                color: _chartStack.length > 1 ? Colors.black : Colors.grey,
                 size: 20.0,
               ),
-              label: const Text(
+              label: Text(
                 'Back',
                 style: TextStyle(
-                  color: Colors.grey,
+                  color: _chartStack.length > 1 ? Colors.black : Colors.grey,
                   fontSize: 16.0,
                 ),
               ),
@@ -311,28 +393,32 @@ class _ChartDrilldownState extends State<ChartDrilldown>
               ),
             ),
           ),
-          
           const SizedBox(height: 16),
           Expanded(
             child: BarChart(
               BarChartData(
-                barGroups: List.generate(mainGroupedData.length, (index) {
-                  final groupData = mainGroupedData[index];
-                  // Determine if the current group is hovered
+                barGroups: List.generate(chartData.groupedData.length, (index) {
+                  final groupData = chartData.groupedData[index];
                   final isHovered = index == _hoveredGroupIndex;
+
+                  final Color bar1Color = isHovered
+                      ? chartData.barColors1[index % chartData.barColors1.length]
+                          .withOpacity(0.8)
+                      : chartData.barColors1[index % chartData.barColors1.length];
+                  final Color bar2Color = isHovered
+                      ? chartData.barColors2[index % chartData.barColors2.length]
+                          .withOpacity(0.8)
+                      : chartData.barColors2[index % chartData.barColors2.length];
+                  final double barWidth = 40;
 
                   return BarChartGroupData(
                     x: index,
                     barRods: [
                       BarChartRodData(
                         toY: groupData[0], // First bar (e.g., Actual)
-                        color: isHovered
-                            ? barColors1[index].withOpacity(0.8)
-                            : barColors1[index],
-                        width: isHovered ? 40 : 40, // Slightly larger on hover
-                        // --- REMOVE CIRCULAR CORNERS HERE ---
-                        borderRadius: BorderRadius.zero, // Make corners sharp
-                        // --- END REMOVE CIRCULAR CORNERS ---
+                        color: bar1Color,
+                        width: barWidth,
+                        borderRadius: BorderRadius.zero,
                         borderSide: isHovered
                             ? BorderSide(
                                 color: Colors.black.withOpacity(0.5), width: 2)
@@ -340,20 +426,16 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                       ),
                       BarChartRodData(
                         toY: groupData[1], // Second bar (e.g., Target)
-                        color: isHovered
-                            ? barColors2[index].withOpacity(0.8)
-                            : barColors2[index],
-                        width: isHovered ? 40 : 40, // Slightly larger on hover
-                        // --- REMOVE CIRCULAR CORNERS HERE ---
-                        borderRadius: BorderRadius.zero, // Make corners sharp
-                        // --- END REMOVE CIRCULAR CORNERS ---
+                        color: bar2Color,
+                        width: barWidth,
+                        borderRadius: BorderRadius.zero,
                         borderSide: isHovered
                             ? BorderSide(
                                 color: Colors.black.withOpacity(0.5), width: 2)
                             : BorderSide.none,
                       ),
                     ],
-                    barsSpace: 8, // Space between the two bars in a group
+                    barsSpace: 8,
                   );
                 }),
                 barTouchData: BarTouchData(
@@ -363,7 +445,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                     tooltipPadding: const EdgeInsets.all(8),
                     tooltipMargin: 8,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final currentGroupData = mainGroupedData[groupIndex];
+                      final currentGroupData = chartData.groupedData[groupIndex];
                       final actual = currentGroupData[0].toInt();
                       final target = currentGroupData[1].toInt();
                       return BarTooltipItem(
@@ -375,8 +457,7 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                   touchCallback: (event, response) {
                     if (event.isInterestedForInteractions) {
                       setState(() {
-                        _hoveredGroupIndex =
-                            response?.spot?.touchedBarGroupIndex;
+                        _hoveredGroupIndex = response?.spot?.touchedBarGroupIndex;
                       });
                     } else {
                       setState(() {
@@ -389,28 +470,26 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                   },
                 ),
                 titlesData: FlTitlesData(
-                  // --- REMOVE BOTH Y-AXIS LABELS (LEFT AND RIGHT) ---
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: false, // Disable left titles
+                      showTitles: false,
                     ),
                   ),
                   rightTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: false, // Disable right titles
+                      showTitles: false,
                     ),
                   ),
-                  // --- END REMOVE Y-AXIS LABELS ---
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
                         if (value.toInt() >= 0 &&
-                            value.toInt() < mainLabels.length) {
+                            value.toInt() < chartData.labels.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
-                              mainLabels[value.toInt()],
+                              chartData.labels[value.toInt()],
                               style: const TextStyle(fontSize: 12),
                             ),
                           );
@@ -432,239 +511,18 @@ class _ChartDrilldownState extends State<ChartDrilldown>
                 borderData: FlBorderData(show: false),
                 gridData: FlGridData(show: false),
                 alignment: BarChartAlignment.spaceAround,
-                maxY: 250, // Max Y should be adjusted based on your new data
+                maxY: chartData.maxY,
               ),
             ),
           ),
-          // Add a legend if desired for the two bars
           Padding(
             padding: const EdgeInsets.only(top: 16.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const _LegendColor(color: Colors.redAccent, text: 'Actual'),
+                _LegendColor(color: chartData.barColors1[0], text: 'Actual'),
                 const SizedBox(width: 20),
-                _LegendColor(color: Colors.redAccent.shade100, text: 'Target'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Define subBarColors for sub-chart bars
-  final List<Color> subBarColors = [
-    Colors.deepOrange,
-    Colors.teal,
-    Colors.indigo,
-    Colors.pinkAccent,
-    Colors.cyan,
-    Colors.lime,
-  ];
-
-  Widget _buildSubChart() {
-    if (_selectedRangeIndex == null) {
-      return const SizedBox.shrink();
-    }
-    final data = subChartGroupedData[_selectedRangeIndex!]!;
-    final labels = subChartLabels[_selectedRangeIndex!]!;
-
-    return Container(
-      key: const ValueKey('sub'),
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Attendance Ranges',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Click on bars for more details',
-            style: TextStyle(color: Colors.grey),
-          ),
-          const SizedBox(height: 4), // Adjusted for consistent spacing
-          // Back button on the sub-chart
-          SizedBox(
-            height: 40, // Fixed height for consistent spacing
-            child: TextButton.icon(
-              onPressed: _goBack,
-              icon: const Icon(
-                Icons.arrow_back,
-                color: Colors.black,
-                size: 20.0,
-              ),
-              label: const Text(
-                'Back',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontSize: 16.0,
-                ),
-              ),
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                alignment: Alignment.centerLeft,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 16),
-          Expanded(
-            child: BarChart(
-              BarChartData(
-                barGroups: List.generate(data.length, (index) {
-                  final groupData = data[index];
-                  // Determine if the current group is hovered
-                  final isHovered = index == _hoveredGroupIndex;
-
-                  // Apply highlight effect here
-                  final Color bar1Color = isHovered
-                      ? subBarColors[index % subBarColors.length]
-                          .withOpacity(0.8)
-                      : subBarColors[index % subBarColors.length];
-                  final Color bar2Color = isHovered
-                      ? subBarColors[index % subBarColors.length]
-                          .withOpacity(0.4)
-                      : subBarColors[index % subBarColors.length]
-                          .withOpacity(0.5);
-                  final double barWidth =
-                      isHovered ? 40 : 40; // Slightly larger on hover
-
-                  return BarChartGroupData(
-                    x: index,
-                    barRods: [
-                      BarChartRodData(
-                        toY: groupData[0], // First bar (e.g., Actual)
-                        color: bar1Color,
-                        width: barWidth,
-                        // --- REMOVE CIRCULAR CORNERS HERE ---
-                        borderRadius: BorderRadius.zero, // Make corners sharp
-                        // --- END REMOVE CIRCULAR CORNERS ---
-                        borderSide: isHovered
-                            ? BorderSide(
-                                color: Colors.black.withOpacity(0.5), width: 2)
-                            : BorderSide.none,
-                      ),
-                      BarChartRodData(
-                        toY: groupData[1], // Second bar (e.g., Target)
-                        color: bar2Color,
-                        width: barWidth,
-                        // --- REMOVE CIRCULAR CORNERS HERE ---
-                        borderRadius: BorderRadius.zero, // Make corners sharp
-                        // --- END REMOVE CIRCULAR CORNERS ---
-                        borderSide: isHovered
-                            ? BorderSide(
-                                color: Colors.black.withOpacity(0.5), width: 2)
-                            : BorderSide.none,
-                      ),
-                    ],
-                    barsSpace: 8, // Space between bars in a group
-                  );
-                }),
-                barTouchData: BarTouchData(
-                  enabled: true,
-                  touchTooltipData: BarTouchTooltipData(
-                    tooltipBgColor: Colors.white,
-                    tooltipPadding: const EdgeInsets.all(8),
-                    tooltipMargin: 8,
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final currentGroupData = data[groupIndex];
-                      final actual = currentGroupData[0].toInt();
-                      final target = currentGroupData[1].toInt();
-
-                      return BarTooltipItem(
-                        'Actual: $actual\nTarget: $target',
-                        const TextStyle(color: Colors.black),
-                      );
-                    },
-                  ),
-                  touchCallback: (event, response) {
-                    if (event.isInterestedForInteractions) {
-                      setState(() {
-                        _hoveredGroupIndex =
-                            response?.spot?.touchedBarGroupIndex;
-                      });
-                    } else {
-                      setState(() {
-                        _hoveredGroupIndex = null; // Reset when not hovered
-                      });
-                    }
-                    // No tap action for sub-chart based on your current code
-                  },
-                ),
-                titlesData: FlTitlesData(
-                  // --- REMOVE BOTH Y-AXIS LABELS (LEFT AND RIGHT) ---
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: false, // Disable left titles
-                    ),
-                  ),
-                  rightTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: false, // Disable right titles
-                    ),
-                  ),
-                  // --- END REMOVE Y-AXIS LABELS ---
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (value, meta) {
-                        if (value.toInt() >= 0 &&
-                            value.toInt() < labels.length) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(
-                              labels[value.toInt()],
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                  ),
-                  topTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 24,
-                      getTitlesWidget: (value, meta) {
-                        return const Text('', style: TextStyle(fontSize: 10));
-                      },
-                    ),
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                gridData: FlGridData(show: false),
-                alignment: BarChartAlignment.spaceAround,
-                maxY: 100,
-              ),
-            ),
-          ),
-          // Add a legend if desired for the two bars
-          Padding(
-            padding: const EdgeInsets.only(top: 16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const _LegendColor(color: Colors.deepOrange, text: 'Actual'),
-                const SizedBox(width: 20),
-                _LegendColor(
-                    color: Colors.deepOrange.withOpacity(0.5), text: 'Target'),
+                _LegendColor(color: chartData.barColors2[0], text: 'Target'),
               ],
             ),
           ),
@@ -677,19 +535,21 @@ class _ChartDrilldownState extends State<ChartDrilldown>
 // Custom Clipper to achieve dynamic reveal effect based on type
 class SplitRevealClipper extends CustomClipper<Path> {
   final double revealFraction;
-  final RevealAnimationType animationType; // New parameter
-  final bool isForward; // Crucial for correct clipping after animation
+  final RevealAnimationType animationType;
+  // `isForward` will always be true when this clipper is used now,
+  // as we only use it for the forward drill-down animation.
+  final bool isForward;
 
   SplitRevealClipper({
     required this.revealFraction,
     required this.animationType,
-    required this.isForward,
+    required this.isForward, // Kept for consistency, but will always be true when used.
   });
 
   @override
   Path getClip(Size size) {
-    final double effectiveRevealFraction =
-        isForward ? revealFraction : (1.0 - revealFraction);
+    // Only reveal when going forward. For backward, the clipper is not used.
+    final double effectiveReveal = revealFraction; // Simpler now, as `isForward` is always true.
 
     final path = Path();
     final halfWidth = size.width / 2;
@@ -699,30 +559,30 @@ class SplitRevealClipper extends CustomClipper<Path> {
         path.addRect(Rect.fromLTWH(
           0,
           0,
-          size.width * effectiveRevealFraction,
+          size.width * effectiveReveal,
           size.height,
         ));
         break;
       case RevealAnimationType.right:
         path.addRect(Rect.fromLTWH(
-          size.width - (size.width * effectiveRevealFraction),
+          size.width - (size.width * effectiveReveal),
           0,
-          size.width * effectiveRevealFraction,
+          size.width * effectiveReveal,
           size.height,
         ));
         break;
       case RevealAnimationType.centerSplit:
         path.addRect(Rect.fromLTWH(
-          halfWidth - (halfWidth * effectiveRevealFraction),
+          halfWidth - (halfWidth * effectiveReveal), // Start from left of center
           0,
-          halfWidth * effectiveRevealFraction,
+          halfWidth * effectiveReveal, // Expand to center
           size.height,
         ));
 
         path.addRect(Rect.fromLTWH(
-          halfWidth,
+          halfWidth, // Start from right of center
           0,
-          halfWidth * effectiveRevealFraction,
+          halfWidth * effectiveReveal, // Expand from center
           size.height,
         ));
         break;
@@ -734,7 +594,7 @@ class SplitRevealClipper extends CustomClipper<Path> {
   bool shouldReclip(covariant SplitRevealClipper oldClipper) {
     return oldClipper.revealFraction != revealFraction ||
         oldClipper.animationType != animationType ||
-        oldClipper.isForward != isForward;
+        oldClipper.isForward != isForward; // Kept for completeness, but `isForward` won't change here.
   }
 }
 
